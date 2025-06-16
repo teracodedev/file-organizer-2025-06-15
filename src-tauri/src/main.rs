@@ -3,7 +3,6 @@ use std::path::Path;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_shell::ShellExt;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct OrganizeRule {
@@ -116,7 +115,6 @@ async fn select_file(app_handle: tauri::AppHandle) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             load_config,
             organize_files,
