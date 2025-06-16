@@ -1,51 +1,143 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import React, { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import './App.css';
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+interface OrganizeRule {
+  name: string;
+  source_folder: string;
+  pattern: string;
+  destination_folder: string;
+}
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+interface Config {
+  rules: OrganizeRule[];
+}
+
+type StatusType = 'success' | 'error' | 'loading' | null;
+
+const App: React.FC = () => {
+  const [configPath, setConfigPath] = useState<string>('');
+  const [currentConfig, setCurrentConfig] = useState<Config | null>(null);
+  const [results, setResults] = useState<string[]>([]);
+  const [status, setStatus] = useState<{message: string; type: StatusType}>({
+    message: '',
+    type: null
+  });
+
+  const selectConfigFile = async () => {
+    try {
+      const path = await invoke<string>('select_file');
+      setConfigPath(path);
+      setStatus({ message: 'ファイルが選択されました', type: 'success' });
+    } catch (error) {
+      setStatus({ message: 'ファイル選択がキャンセルされました', type: 'error' });
+    }
+  };
+
+  const loadConfig = async () => {
+    if (!configPath) {
+      setStatus({ message: '設定ファイルを選択してください', type: 'error' });
+      return;
+    }
+
+    try {
+      setStatus({ message: '設定ファイルを読み込み中...', type: 'loading' });
+      const config = await invoke<Config>('load_config', { configPath });
+      setCurrentConfig(config);
+      setStatus({ 
+        message: `設定を読み込みました (${config.rules.length}個のルール)`, 
+        type: 'success' 
+      });
+      setResults([]);
+    } catch (error) {
+      setStatus({ 
+        message: `設定ファイルの読み込みに失敗しました: ${error}`, 
+        type: 'error' 
+      });
+      setCurrentConfig(null);
+    }
+  };
+
+  const organizeFiles = async () => {
+    if (!configPath) {
+      setStatus({ message: '設定ファイルを選択してください', type: 'error' });
+      return;
+    }
+
+    try {
+      setStatus({ message: 'ファイル整理を実行中...', type: 'loading' });
+      const results = await invoke<string[]>('organize_files', { configPath });
+      setResults(results);
+      setStatus({ message: 'ファイル整理が完了しました', type: 'success' });
+    } catch (error) {
+      setStatus({ 
+        message: `ファイル整理に失敗しました: ${error}`, 
+        type: 'error' 
+      });
+    }
+  };
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vitejs.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://reactjs.org" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="container">
+      <h1>🗂️ File Organizer</h1>
+      
+      <div className="form-group">
+        <label htmlFor="configPath">設定ファイル (YAML):</label>
+        <div className="button-group">
+          <input
+            type="text"
+            id="configPath"
+            value={configPath}
+            onChange={(e) => setConfigPath(e.target.value)}
+            placeholder="設定ファイルのパスを選択してください"
+          />
+          <button type="button" className="btn-secondary" onClick={selectConfigFile}>
+            📁 選択
+          </button>
+        </div>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      <div className="button-group">
+        <button type="button" className="btn-primary" onClick={loadConfig}>
+          ⚙️ 設定を読み込み
+        </button>
+        <button type="button" className="btn-success" onClick={organizeFiles}>
+          🚀 ファイル整理実行
+        </button>
+      </div>
+
+      {status.type && (
+        <div className={`status ${status.type}`}>
+          {status.type === 'loading' && <div className="loading"></div>}
+          {status.message}
+        </div>
+      )}
+
+      {currentConfig && (
+        <div className="results">
+          <h3>📋 読み込まれた設定</h3>
+          {currentConfig.rules.map((rule, index) => (
+            <div key={index} className="result-item">
+              <strong>{rule.name}</strong><br />
+              📂 {rule.source_folder} → 📁 {rule.destination_folder}<br />
+              🔍 パターン: <code>{rule.pattern}</code>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {results.length > 0 && (
+        <div className="results">
+          <h3>📊 実行結果</h3>
+          {results.map((result, index) => (
+            <div key={index} className="result-item">
+              {result}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
-}
+};
 
 export default App;
