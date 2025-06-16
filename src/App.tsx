@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './App.css';
 
@@ -24,25 +24,27 @@ const App: React.FC = () => {
     type: null
   });
 
-  const selectConfigFile = async () => {
-    try {
-      const path = await invoke<string>('select_file');
-      setConfigPath(path);
-      setStatus({ message: 'ファイルが選択されました', type: 'success' });
-    } catch (error) {
-      setStatus({ message: 'ファイル選択がキャンセルされました', type: 'error' });
-    }
-  };
+  // 起動時に保存された設定ファイルのパスを読み込む
+  useEffect(() => {
+    const loadSavedConfig = async () => {
+      try {
+        const savedConfigPath = await invoke<string | null>('load_last_config_path');
+        if (savedConfigPath) {
+          setConfigPath(savedConfigPath);
+          // 保存されたパスが存在する場合は自動的に設定を読み込む
+          await loadConfigFromPath(savedConfigPath);
+        }
+      } catch (error) {
+        console.error('保存された設定の読み込みに失敗しました:', error);
+      }
+    };
+    loadSavedConfig();
+  }, []);
 
-  const loadConfig = async () => {
-    if (!configPath) {
-      setStatus({ message: '設定ファイルを選択してください', type: 'error' });
-      return;
-    }
-
+  const loadConfigFromPath = async (path: string) => {
     try {
       setStatus({ message: '設定ファイルを読み込み中...', type: 'loading' });
-      const config = await invoke<Config>('load_config', { configPath });
+      const config = await invoke<Config>('load_config', { configPath: path });
       setCurrentConfig(config);
       setStatus({ 
         message: `設定を読み込みました (${config.rules.length}個のルール)`, 
@@ -56,6 +58,26 @@ const App: React.FC = () => {
       });
       setCurrentConfig(null);
     }
+  };
+
+  const selectConfigFile = async () => {
+    try {
+      const path = await invoke<string>('select_file');
+      setConfigPath(path);
+      // 選択したパスを保存
+      await invoke('save_last_config_path', { configPath: path });
+      setStatus({ message: 'ファイルが選択されました', type: 'success' });
+    } catch (error) {
+      setStatus({ message: 'ファイル選択がキャンセルされました', type: 'error' });
+    }
+  };
+
+  const loadConfig = async () => {
+    if (!configPath) {
+      setStatus({ message: '設定ファイルを選択してください', type: 'error' });
+      return;
+    }
+    await loadConfigFromPath(configPath);
   };
 
   const organizeFiles = async () => {

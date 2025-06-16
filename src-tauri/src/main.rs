@@ -5,6 +5,8 @@ use std::path::Path;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_dialog::DialogExt;
+use std::io::Write;
+use dirs::config_dir;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct OrganizeRule {
@@ -113,6 +115,35 @@ async fn select_file(app_handle: tauri::AppHandle) -> Result<String, String> {
     }
 }
 
+#[tauri::command]
+async fn save_last_config_path(_app_handle: tauri::AppHandle, config_path: String) -> Result<(), String> {
+    let config_dir = config_dir()
+        .ok_or_else(|| "設定ディレクトリの取得に失敗しました".to_string())?
+        .join("file-organizer");
+    fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("設定ディレクトリの作成に失敗しました: {}", e))?;
+    let config_file = config_dir.join("last_config.txt");
+    let mut file = fs::File::create(config_file)
+        .map_err(|e| format!("設定ファイルの作成に失敗しました: {}", e))?;
+    file.write_all(config_path.as_bytes())
+        .map_err(|e| format!("設定の保存に失敗しました: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_last_config_path(_app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    let config_dir = config_dir()
+        .ok_or_else(|| "設定ディレクトリの取得に失敗しました".to_string())?
+        .join("file-organizer");
+    let config_file = config_dir.join("last_config.txt");
+    if !config_file.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(config_file)
+        .map_err(|e| format!("設定ファイルの読み込みに失敗しました: {}", e))?;
+    Ok(Some(content))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -121,7 +152,9 @@ pub fn run() {
             load_config,
             organize_files,
             select_folder,
-            select_file
+            select_file,
+            save_last_config_path,
+            load_last_config_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
