@@ -83,15 +83,16 @@ const App: React.FC = () => {
       
       <div className="form-group">
         <label htmlFor="configPath">設定ファイル (YAML):</label>
-        <div className="button-group">
+        <div className="button-group" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <input
             type="text"
             id="configPath"
             value={configPath}
             onChange={(e) => setConfigPath(e.target.value)}
             placeholder="設定ファイルのパスを選択してください"
+            style={{ flex: 1, minWidth: 0 }}
           />
-          <button type="button" className="btn-secondary" onClick={selectConfigFile}>
+          <button type="button" className="btn-secondary" onClick={selectConfigFile} style={{ whiteSpace: 'nowrap' }}>
             📁 選択
           </button>
         </div>
