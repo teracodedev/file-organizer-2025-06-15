@@ -37,21 +37,27 @@ async fn organize_files(config_path: String) -> Result<Vec<String>, String> {
     let config = load_config(config_path).await?;
     let mut results = Vec::new();
     // ログファイルのパスを決定
-    let log_path = std::path::Path::new("C:/python/file-organizer-2025-06-15/file-organizer.log");
-    let mut log_file = fs::OpenOptions::new()
+    #[cfg(debug_assertions)]
+    let mut log_file = Some(std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
-        .open(log_path)
-        .map_err(|e| format!("ログファイルの作成/オープンに失敗しました: {}", e))?;
+        .open("C:/python/file-organizer-2025-06-15/file-organizer.log")
+        .map_err(|e| format!("ログファイルの作成/オープンに失敗しました: {}", e))?);
+    #[cfg(not(debug_assertions))]
+    let mut log_file: Option<std::fs::File> = None;
     
     for rule in config.rules {
         let source_path = Path::new(&rule.source_folder);
         let dest_path = Path::new(&rule.destination_folder);
-        writeln!(log_file, "--- ルール: {} (パターン: {}) ---", rule.name, rule.pattern).ok();
+        if let Some(ref mut log_file) = log_file {
+            writeln!(log_file, "--- ルール: {} (パターン: {}) ---", rule.name, rule.pattern).ok();
+        }
         if !source_path.exists() {
             results.push(format!("警告: ソースフォルダが存在しません: {}", rule.source_folder));
-            writeln!(log_file, "警告: ソースフォルダが存在しません: {}", rule.source_folder).ok();
+            if let Some(ref mut log_file) = log_file {
+                writeln!(log_file, "警告: ソースフォルダが存在しません: {}", rule.source_folder).ok();
+            }
             continue;
         }
         // 宛先フォルダを作成
@@ -71,28 +77,44 @@ async fn organize_files(config_path: String) -> Result<Vec<String>, String> {
             let is_file = entry.file_type().map_err(|e| format!("ファイルタイプの取得に失敗しました: {}", e))?.is_file();
             if is_file {
                 let matched = regex.is_match(&file_name_str);
-                writeln!(log_file, "ファイル: {} → マッチ: {}", file_name_str, matched).ok();
+                if let Some(ref mut log_file) = log_file {
+                    writeln!(log_file, "ファイル: {} → マッチ: {}", file_name_str, matched).ok();
+                }
                 if matched {
                     let source_file = entry.path();
                     let dest_file = dest_path.join(&file_name);
-                    match fs::rename(&source_file, &dest_file) {
+                    match fs::copy(&source_file, &dest_file) {
                         Ok(_) => {
-                            moved_count += 1;
-                            results.push(format!("移動: {} -> {}", 
-                                source_file.display(), 
-                                dest_file.display()));
-                            writeln!(log_file, "移動: {} -> {}", source_file.display(), dest_file.display()).ok();
+                            match fs::remove_file(&source_file) {
+                                Ok(_) => {
+                                    moved_count += 1;
+                                    results.push(format!("コピー+削除で移動: {} -> {}", source_file.display(), dest_file.display()));
+                                    if let Some(ref mut log_file) = log_file {
+                                        writeln!(log_file, "コピー+削除で移動: {} -> {}", source_file.display(), dest_file.display()).ok();
+                                    }
+                                }
+                                Err(e2) => {
+                                    results.push(format!("コピー後の削除失敗 {}: {}", source_file.display(), e2));
+                                    if let Some(ref mut log_file) = log_file {
+                                        writeln!(log_file, "コピー後の削除失敗 {}: {}", source_file.display(), e2).ok();
+                                    }
+                                }
+                            }
                         }
-                        Err(e) => {
-                            results.push(format!("移動失敗 {}: {}", source_file.display(), e));
-                            writeln!(log_file, "移動失敗 {}: {}", source_file.display(), e).ok();
+                        Err(e2) => {
+                            results.push(format!("移動失敗 {}: {}", source_file.display(), e2));
+                            if let Some(ref mut log_file) = log_file {
+                                writeln!(log_file, "copy失敗 {}: {}", source_file.display(), e2).ok();
+                            }
                         }
                     }
                 }
             }
         }
         results.push(format!("ルール '{}': {}個のファイルを移動しました", rule.name, moved_count));
-        writeln!(log_file, "ルール '{}': {}個のファイルを移動しました", rule.name, moved_count).ok();
+        if let Some(ref mut log_file) = log_file {
+            writeln!(log_file, "ルール '{}': {}個のファイルを移動しました", rule.name, moved_count).ok();
+        }
     }
     Ok(results)
 }
