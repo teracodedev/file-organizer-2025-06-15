@@ -123,9 +123,9 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <div className="button-group">
+      <div className="button-group" style={{ display: 'flex', justifyContent: 'center' }}>
         <button type="button" className="btn-success" onClick={organizeFiles}>
-          🚀 ファイル整理実行
+          ファイル整理実行
         </button>
       </div>
 
