@@ -24,6 +24,12 @@ struct Config {
     rules: Vec<OrganizeRule>,
 }
 
+#[derive(Debug, Serialize)]
+struct LoadResult {
+    path: String,
+    config: Config,
+}
+
 #[tauri::command]
 async fn load_config(config_path: String) -> Result<Config, String> {
     let content = fs::read_to_string(&config_path)
@@ -170,7 +176,7 @@ async fn select_folder() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn select_file(app_handle: tauri::AppHandle) -> Result<String, String> {
+async fn select_file(app_handle: tauri::AppHandle) -> Result<LoadResult, String> {
     let (tx, rx) = oneshot::channel();
     app_handle.dialog()
         .file()
@@ -184,7 +190,16 @@ async fn select_file(app_handle: tauri::AppHandle) -> Result<String, String> {
     match file_path_option {
         Some(path) => {
             if let Some(p) = path.as_path() {
-                Ok(p.to_string_lossy().into_owned())
+                let path_str = p.to_string_lossy().into_owned();
+                
+                let config = load_config(path_str.clone()).await?;
+                
+                save_last_config_path(app_handle, path_str.clone()).await?;
+                
+                Ok(LoadResult {
+                    path: path_str,
+                    config,
+                })
             } else {
                 Err("パスの変換に失敗しました".to_string())
             }

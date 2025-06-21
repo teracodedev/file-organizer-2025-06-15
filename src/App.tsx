@@ -13,6 +13,11 @@ interface Config {
   rules: OrganizeRule[];
 }
 
+interface LoadResult {
+  path: string;
+  config: Config;
+}
+
 type StatusType = 'success' | 'error' | 'loading' | null;
 
 const App: React.FC = () => {
@@ -62,22 +67,19 @@ const App: React.FC = () => {
 
   const selectConfigFile = async () => {
     try {
-      const path = await invoke<string>('select_file');
-      setConfigPath(path);
-      // 選択したパスを保存
-      await invoke('save_last_config_path', { configPath: path });
-      setStatus({ message: 'ファイルが選択されました', type: 'success' });
+      setStatus({ message: 'ファイルを選択中...', type: 'loading' });
+      const result = await invoke<LoadResult>('select_file');
+      setConfigPath(result.path);
+      setCurrentConfig(result.config);
+      setStatus({ 
+        message: `設定を読み込みました (${result.config.rules.length}個のルール)`, 
+        type: 'success' 
+      });
+      setResults([]);
     } catch (error) {
-      setStatus({ message: 'ファイル選択がキャンセルされました', type: 'error' });
+      setStatus({ message: `ファイル選択または設定の読み込みに失敗しました: ${error}`, type: 'error' });
+      setCurrentConfig(null);
     }
-  };
-
-  const loadConfig = async () => {
-    if (!configPath) {
-      setStatus({ message: '設定ファイルを選択してください', type: 'error' });
-      return;
-    }
-    await loadConfigFromPath(configPath);
   };
 
   const organizeFiles = async () => {
@@ -111,19 +113,17 @@ const App: React.FC = () => {
             id="configPath"
             value={configPath}
             onChange={(e) => setConfigPath(e.target.value)}
-            placeholder="設定ファイルのパスを選択してください"
+            placeholder="右のボタンから設定ファイルを選択"
             style={{ flex: 1, minWidth: 0 }}
+            readOnly
           />
           <button type="button" className="btn-secondary" onClick={selectConfigFile} style={{ whiteSpace: 'nowrap' }}>
-            📁 選択
+            📁 選択して読み込み
           </button>
         </div>
       </div>
 
       <div className="button-group">
-        <button type="button" className="btn-primary" onClick={loadConfig}>
-          ⚙️ 設定を読み込み
-        </button>
         <button type="button" className="btn-success" onClick={organizeFiles}>
           🚀 ファイル整理実行
         </button>
@@ -131,7 +131,6 @@ const App: React.FC = () => {
 
       {status.type && (
         <div className={`status ${status.type}`}>
-          {status.type === 'loading' && <div className="loading"></div>}
           {status.message}
         </div>
       )}
