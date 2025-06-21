@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use tauri_plugin_dialog::DialogExt;
 use std::io::Write;
 use dirs::config_dir;
+use tauri::{AppHandle, Manager};
+use chrono::Local;
+use tokio::sync::oneshot;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct OrganizeRule {
@@ -119,6 +122,47 @@ async fn organize_files(config_path: String) -> Result<Vec<String>, String> {
     Ok(results)
 }
 
+async fn backup_rules_handler(app_handle: &AppHandle) -> Result<String, String> {
+    let last_config_path_str = get_last_config_path()?
+        .ok_or("最後に使用した設定ファイルが見つかりません。まずは一度ルールを読み込んで実行してください。")?;
+    let source_path = Path::new(&last_config_path_str);
+
+    if !source_path.exists() {
+        return Err(format!("バックアップ元のファイルが見つかりません: {}", last_config_path_str));
+    }
+    
+    let (tx, rx) = oneshot::channel();
+    app_handle.dialog().file().pick_folder(move |path| {
+        let _ = tx.send(path);
+    });
+
+    let dest_folder_option = rx.await.map_err(|e| e.to_string())?;
+
+    if let Some(dest_folder) = dest_folder_option {
+        if let Some(dest_folder_path) = dest_folder.as_path() {
+            let now = Local::now();
+            let timestamp = now.format("%Y年%m月%d日%H時%M分%S秒").to_string();
+            
+            let original_filename = source_path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("rules.yaml");
+
+            let backup_filename = format!("{}.backup({})", original_filename, timestamp);
+            
+            let dest_path = dest_folder_path.join(backup_filename);
+
+            fs::copy(&source_path, &dest_path)
+                .map_err(|e| format!("バックアップに失敗しました: {}", e))?;
+            
+            Ok(format!("バックアップが完了しました。\n保存先: {}", dest_path.to_string_lossy()))
+        } else {
+            Err("無効なフォルダパスが選択されました。".to_string())
+        }
+    } else {
+        Ok("バックアップ処理はキャンセルされました。".to_string())
+    }
+}
+
 // ファイル・フォルダ選択機能は一旦無効化
 #[tauri::command]
 async fn select_folder() -> Result<String, String> {
@@ -127,18 +171,24 @@ async fn select_folder() -> Result<String, String> {
 
 #[tauri::command]
 async fn select_file(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let file_path = app_handle.dialog()
+    let (tx, rx) = oneshot::channel();
+    app_handle.dialog()
         .file()
         .add_filter("YAML", &["yaml", "yml"])
-        .blocking_pick_file();
+        .pick_file(move |file_path| {
+            let _ = tx.send(file_path);
+        });
     
-    match file_path {
+    let file_path_option = rx.await.map_err(|e| e.to_string())?;
+    
+    match file_path_option {
         Some(path) => {
-            match path.as_path() {
-                Some(p) => Ok(p.to_string_lossy().into_owned()),
-                None => Err("パスの取得に失敗しました".to_string())
+            if let Some(p) = path.as_path() {
+                Ok(p.to_string_lossy().into_owned())
+            } else {
+                Err("パスの変換に失敗しました".to_string())
             }
-        },
+        }
         None => Err("ファイル選択がキャンセルされました".to_string())
     }
 }
@@ -158,8 +208,7 @@ async fn save_last_config_path(_app_handle: tauri::AppHandle, config_path: Strin
     Ok(())
 }
 
-#[tauri::command]
-async fn load_last_config_path(_app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+fn get_last_config_path() -> Result<Option<String>, String> {
     let config_dir = config_dir()
         .ok_or_else(|| "設定ディレクトリの取得に失敗しました".to_string())?
         .join("file-organizer");
@@ -172,10 +221,42 @@ async fn load_last_config_path(_app_handle: tauri::AppHandle) -> Result<Option<S
     Ok(Some(content))
 }
 
+#[tauri::command]
+async fn load_last_config_path(_app_handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    get_last_config_path()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let handle = app.handle();
+            let backup_item =
+                tauri::menu::MenuItem::with_id(handle, "backup_rules", "ルールのバックアップ", true, None::<&str>)?;
+            let menu = tauri::menu::Menu::with_items(handle, &[&backup_item])?;
+            app.set_menu(menu)?;
+            Ok(())
+        })
+        .on_menu_event(|window, event| {
+            if event.id() == "backup_rules" {
+                let window = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    let app_handle = window.app_handle();
+                    let result = backup_rules_handler(app_handle).await;
+                    let dialog = app_handle.dialog();
+                    match result {
+                        Ok(message) => {
+                            dialog.message(message).show(|_| {});
+                        }
+                        Err(e) => {
+                            dialog.message(e).show(|_| {});
+                        }
+                    }
+                });
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             load_config,
             organize_files,
